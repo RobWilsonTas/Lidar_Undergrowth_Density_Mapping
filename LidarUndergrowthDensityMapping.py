@@ -161,7 +161,7 @@ lasground_new -i ''' + zipName + r'''LasLaz/*.laz -cores 4 -wilderness -compute_
 
 :: now we're going to merge the normalised las tiles together, make sure the folders line up with the parameters
 %LAStools%^
-lasmerge -i ''' + zipName + r'''LasNorm/*.las -o ''' + zipName + r'''Merged/Merged.las -drop_z_below -0.5 -drop_z_above 2''')
+lasmerge -i ''' + zipName + r'''LasNorm/*.las -o ''' + zipName + r'''Merged/Merged.las -drop_z_below -0.5 -drop_z_above 1.8''')
 myBat.close()
 
 #Run the bat file 
@@ -246,6 +246,48 @@ finalLayer.renderer().setRedContrastEnhancement(myEnhancement)#the same contrast
 finalLayer.renderer().setGreenContrastEnhancement(myEnhancement)
 finalLayer.renderer().setBlueContrastEnhancement(myEnhancement)
 finalLayer.triggerRepaint() #refresh
+
+"""
+#################################################################################
+Creating a low lying veg density raster
+"""
+
+
+processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':9,'type':1,'base_raster':None,'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],
+'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':4,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,
+'output':path + '/' + zipName + 'VegDens/Median4.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
+
+processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':9,'type':1,'base_raster':None,'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],
+'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':5,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,
+'output':path + '/' + zipName + 'VegDens/Median5.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
+
+processing.run("gdal:warpreproject", {'INPUT':path + '/' + zipName + 'VegDens/Median4.tif','SOURCE_CRS':None,'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,
+'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':threeRasterExtent,'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'',
+'OUTPUT':path + '/' + zipName + 'VegDens/Median4Resamp.tif'})
+
+processing.run("gdal:warpreproject", {'INPUT':path + '/' + zipName + 'VegDens/Median5.tif','SOURCE_CRS':None,'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,
+'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':threeRasterExtent,'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'',
+'OUTPUT':path + '/' + zipName + 'VegDens/Median5Resamp.tif'})
+
+processing.run("gdal:rastercalculator", {'INPUT_A':path + '/' + zipName + 'VegDens/Median4Resamp.tif','BAND_A':1,'INPUT_B':path + '/' + zipName + 'VegDens/Median5Resamp.tif','BAND_B':1,
+'INPUT_C':path + '/' + zipName + 'VegDens/CombinedUnderstoryDensity.tif','BAND_C':1,'FORMULA':'(0.65-A-B)*C','NO_DATA':-9999,'RTYPE':5,'OPTIONS':'','EXTRA':'',
+'OUTPUT':path + '/' + zipName + 'VegDens/BrackenDensity.tif'})
+
+brackenLayer = iface.addRasterLayer(path + '/' + zipName + 'VegDens/BrackenDensity.tif', 'BrackenDensity' , '')
+
+#Scale between transparent and dark blue, where areas of very low lying veg are dark blue
+fnc = QgsColorRampShader()
+fnc.setColorRampType(QgsColorRampShader.Interpolated)
+lst = [QgsColorRampShader.ColorRampItem(0.0, QColor(0,0,200,0)),QgsColorRampShader.ColorRampItem(0.2, QColor(0,0,200,255))]
+fnc.setColorRampItemList(lst)
+
+shader = QgsRasterShader()
+shader.setRasterShaderFunction(fnc)
+
+renderer = QgsSingleBandPseudoColorRenderer(brackenLayer.dataProvider(), 1, shader)
+brackenLayer.setRenderer(renderer)
+
+brackenLayer.triggerRepaint()
 
 
 """

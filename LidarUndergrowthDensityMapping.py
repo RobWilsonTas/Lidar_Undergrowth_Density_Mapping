@@ -2,7 +2,17 @@ import glob, os, zipfile, re, shutil, sys, time, pathlib, subprocess
 from os import walk
 from qgis.PyQt.QtGui import *
 
-#Run the script and a prompt will appear
+
+"""
+#################################################################################
+User variables
+"""
+
+lasToolsDirectory = 'C:\\LAStools\\bin\\' #Make sure this has double back slashes
+compressOptions = 'COMPRESS=LZW|PREDICTOR=2|NUM_THREADS=8|BIGTIFF=IF_SAFER|TILED=YES'
+
+#Run the script and a prompt will appear for you to enter in the zip folder
+
 
 """
 #################################################################################
@@ -40,8 +50,6 @@ path = path.replace('\u202a','')
 #################################################################################
 Unzipping the elvis package
 """
-
-compressOptions = 'COMPRESS=LZW|PREDICTOR=2|NUM_THREADS=8|BIGTIFF=IF_SAFER|TILED=YES'
 
 
 #This makes sure you are running this is QGIS, where the processing module is available
@@ -92,7 +100,6 @@ for z in zipList:
     count = count + 1
     with zipfile.ZipFile(z,"r") as zip_ref:
         zip_ref.extractall(zipName + 'Extract/Unzipped/UnzippedFolder' + str(count))
-        
 
 
 #Set up new folders to put the relevant files into
@@ -118,27 +125,9 @@ for filePath in filePathsList:
         shutil.move(filePath, path + '/' + zipName + 'LasLaz/' + fileName)
         count = count + 1
 
-
+print ('Yeah successfully sorted ' + str(int(count)) + ' files')
 #Delete the temp folders
 shutil.rmtree(path + '/' + zipName + 'Extract/')
-
-print ('Yeah successfully sorted ' + str(int(count)) + ' files')
-
-"""
-#################################################################################
-Merge the tifs together
-"""
-
-#Let's get all the tifs ready for merging
-path_to_tif = path + '/' + zipName + 'Tif/'
-os.chdir(path_to_tif)
-tifList = []
-for fname in glob.glob("*.tif"):
-    uri = path_to_tif + fname
-    tifList.append(uri)
-
-#Merging tifs. This will work if the script is run in QGIS and the merged tif doesn't already exist
-processing.run("gdal:merge", {'INPUT':tifList,'PCT':False,'SEPARATE':False,'NODATA_INPUT':None,'NODATA_OUTPUT':None,'OPTIONS':compressOptions,'EXTRA':'','DATA_TYPE':5,'OUTPUT':path +  '/' + zipName + 'Merged/MergedDEM.tif'})
 
 
 
@@ -147,18 +136,18 @@ processing.run("gdal:merge", {'INPUT':tifList,'PCT':False,'SEPARATE':False,'NODA
 This is where we make a temp bat file that runs the las tools .exes
 """
 
-
+#Create directories for the normalis
 os.makedirs(path + '/' + zipName + 'LasNorm/', exist_ok = True)
 os.makedirs(path + '/' + zipName + 'Merged/', exist_ok = True)
 
+#The open up a bat ready for writing
 pathWithBackslashes = path.replace('/',chr(92))
-
-#The bat normalises the point clouds and then merges them
 myBat = open(pathWithBackslashes + r'\LasToolsTempRunner.bat','w+')
 
+#Write into the bat as per the readme of lastools
 myBat.write(r''':: set relevant variables
 cd ''' + pathWithBackslashes + r'''
-set LAStools=C:\LAStools\bin\
+set LAStools=''' + lasToolsDirectory + r'''
 
 :: print-out which LAStools version are we running
 %LAStools%^
@@ -166,18 +155,18 @@ lastile -version
 
 :: do the las ground thing
 %LAStools%^
-lasground_new -i LasLaz/*.las -cores 4 -wilderness -compute_height -replace_z -odir LasNorm -olas
+lasground_new -i ''' + zipName + r'''LasLaz/*.las -cores 4 -wilderness -compute_height -replace_z -odir ''' + zipName + r'''LasNorm -olas
 %LAStools%^
-lasground_new -i LasLaz/*.laz -cores 4 -wilderness -compute_height -replace_z -odir LasNorm -olas
+lasground_new -i ''' + zipName + r'''LasLaz/*.laz -cores 4 -wilderness -compute_height -replace_z -odir ''' + zipName + r'''LasNorm -olas
 
 :: now we're going to merge the normalised las tiles together, make sure the folders line up with the parameters
 %LAStools%^
-lasmerge -i LasNorm/*.las -o ''' + zipName + r'''Merged/Merged.las''')
-
+lasmerge -i ''' + zipName + r'''LasNorm/*.las -o ''' + zipName + r'''Merged/Merged.las -drop_z_below -0.5 -drop_z_above 2''')
 myBat.close()
+
+#Run the bat file 
 print("Alright we're running LasTools's stuff from cmd")
 subprocess.call([pathWithBackslashes + r'\LasToolsTempRunner.bat'])
-
 os.remove(pathWithBackslashes + r'\LasToolsTempRunner.bat')
 
 
@@ -186,7 +175,7 @@ os.remove(pathWithBackslashes + r'\LasToolsTempRunner.bat')
 Sampling the lidar las file at various resolutions, to be later combined
 """
 
-
+#Make the folder for the veg density rasters
 os.makedirs(path + '/' + zipName + 'VegDens/', exist_ok = True)
 
 #Determining the density both for the understory and the understory & ground
@@ -235,7 +224,6 @@ Creating and styling a the final density raster
 processing.run("gdal:rastercalculator", {'INPUT_A':path + '/' + zipName + 'VegDens/UnderstoryDens1NormFilledResamp.tif','BAND_A':1,'INPUT_B':path + '/' + zipName + 'VegDens/UnderstoryDens2NormFilledResamp.tif','BAND_B':1,'INPUT_C':path + '/' + zipName + 'VegDens/UnderstoryDens3NormFilledResamp.tif','BAND_C':1,
 'FORMULA':'A+B+C','NO_DATA':-9999,'RTYPE':5,'OPTIONS':'','EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/CombinedUnderstoryDensity.tif'})
 
-
 #Style it so that there is a cumulative cut
 finalLayer = iface.addRasterLayer(path + '/' + zipName + 'VegDens/CombinedUnderstoryDensity.tif', 'CombinedUnderstoryDensity' , '')
 provider=finalLayer.dataProvider()
@@ -258,6 +246,24 @@ finalLayer.renderer().setRedContrastEnhancement(myEnhancement)#the same contrast
 finalLayer.renderer().setGreenContrastEnhancement(myEnhancement)
 finalLayer.renderer().setBlueContrastEnhancement(myEnhancement)
 finalLayer.triggerRepaint() #refresh
+
+
+"""
+#################################################################################
+Merge the dems together
+"""
+
+#Let's get all the tifs ready for merging
+path_to_tif = path + '/' + zipName + 'Tif/'
+os.chdir(path_to_tif)
+tifList = []
+for fname in glob.glob("*.tif"):
+    uri = path_to_tif + fname
+    tifList.append(uri)
+
+#Merging the DEM tifs together
+processing.run("gdal:merge", {'INPUT':tifList,'PCT':False,'SEPARATE':False,'NODATA_INPUT':None,'NODATA_OUTPUT':None,'OPTIONS':compressOptions,'EXTRA':'','DATA_TYPE':5,'OUTPUT':path +  '/' + zipName + 'Merged/MergedDEM.tif'})
+
 
 """
 #################################################################################

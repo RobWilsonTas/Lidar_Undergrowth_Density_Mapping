@@ -1,4 +1,4 @@
-import glob, os, zipfile, re, shutil, sys, time, pathlib, subprocess
+import glob, os, zipfile, re, shutil, sys, time, pathlib, subprocess, multiprocessing
 from os import walk
 from qgis.PyQt.QtGui import *
 
@@ -22,7 +22,7 @@ First we get the initial zip folder
 #This provides a prompt to the user asking them to input the path to the zip folder
 qid = QInputDialog()
 promptTitle = "Path To Zip Folder"
-promptLabel = "(please ensure that your lastools directory is C:/LAStools/bin/, and that your QGIS project coordinate system matches the input data) \n \nEnter below the full path of the zip folder with tifs and las files inside \n \nMake sure you include the folder name and extension, e.g C:/Temp/ElvisZip.zip \n"
+promptLabel = "(please ensure that your lastools directory is " + lasToolsDirectory + ", and that your QGIS project coordinate system matches the input data) \n \nEnter below the full path of the zip folder with tifs and las files inside \n \nMake sure you include the folder name and extension, e.g C:/Temp/ElvisZip.zip \n"
 mode = QLineEdit.Normal
 promptInitialText = "Full path here, e.g  C:/Temp/ElvisZip.zip"
 zipFolderFromElvis, ok = QInputDialog.getText(qid, promptTitle, promptLabel, mode, promptInitialText)
@@ -146,22 +146,17 @@ myBat = open(pathWithBackslashes + r'\LasToolsTempRunner.bat','w+')
 
 #Write into the bat as per the readme of lastools
 myBat.write(r''':: set relevant variables
-cd ''' + pathWithBackslashes + r'''
-set LAStools=''' + lasToolsDirectory + r'''
+cd /d "''' + lasToolsDirectory + r'''"
 
 :: print-out which LAStools version are we running
-%LAStools%^
 lastile -version
 
 :: do the las ground thing
-%LAStools%^
-lasground_new -i ''' + zipName + r'''LasLaz/*.las -cores 4 -wilderness -compute_height -replace_z -odir ''' + zipName + r'''LasNorm -olas
-%LAStools%^
-lasground_new -i ''' + zipName + r'''LasLaz/*.laz -cores 4 -wilderness -compute_height -replace_z -odir ''' + zipName + r'''LasNorm -olas
+lasground_new -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.las" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
+lasground_new -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.laz" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
 
 :: now we're going to merge the normalised las tiles together, make sure the folders line up with the parameters
-%LAStools%^
-lasmerge -i ''' + zipName + r'''LasNorm/*.las -o ''' + zipName + r'''Merged/Merged.las -drop_z_below -0.5 -drop_z_above 1.8''')
+lasmerge -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm/*.las" -o "''' + pathWithBackslashes + '\\' + zipName + r'''Merged/Merged.las" -drop_z_below -0.5 -drop_z_above 1.8''')
 myBat.close()
 
 #Run the bat file 

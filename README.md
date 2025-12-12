@@ -16,6 +16,8 @@ _______________________________
 
 Because of this script's reliance on two programs, there is a likelihood for it to fall over
 
+Ensure that the coordinate system of your QGIS project matches that of your lidar data
+
 Also, if your data hasn't come from Elvis then you'll need to modify the script/your files to make it work
 
 ________________________________

@@ -149,14 +149,14 @@ myBat.write(r''':: set relevant variables
 cd /d "''' + lasToolsDirectory + r'''"
 
 :: print-out which LAStools version are we running
-lastile -version
+lastile64 -version
 
 :: do the las ground thing
-lasground_new -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.las" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
-lasground_new -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.laz" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
+lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.las" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
+lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.laz" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
 
 :: now we're going to merge the normalised las tiles together, make sure the folders line up with the parameters
-lasmerge -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm/*.las" -o "''' + pathWithBackslashes + '\\' + zipName + r'''Merged/Merged.las" -drop_z_below -0.5 -drop_z_above 1.8''')
+lasmerge64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm/*.las" -o "''' + pathWithBackslashes + '\\' + zipName + r'''Merged/Merged.las" -drop_z_below -0.5 -drop_z_above 1.8''')
 myBat.close()
 
 #Run the bat file 

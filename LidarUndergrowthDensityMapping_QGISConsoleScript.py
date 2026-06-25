@@ -1,7 +1,6 @@
 import glob, os, zipfile, re, shutil, sys, time, pathlib, subprocess, multiprocessing
 from os import walk
-from qgis.PyQt.QtGui import *
-
+from PyQt5.QtWidgets import QFileDialog
 
 """
 #################################################################################
@@ -13,201 +12,170 @@ compressOptions = 'COMPRESS=LZW|PREDICTOR=2|NUM_THREADS=8|BIGTIFF=IF_SAFER|TILED
 
 #Run the script and a prompt will appear for you to enter in the zip folder
 
-
 """
 #################################################################################
 First we get the initial zip folder
 """
 
 #This provides a prompt to the user asking them to input the path to the zip folder
-qid = QInputDialog()
-promptTitle = "Path To Zip Folder"
-promptLabel = "(please ensure that your lastools directory is " + lasToolsDirectory + ", and that your QGIS project coordinate system matches the input data) \n \nEnter below the full path of the zip folder with tifs and las files inside \n \nMake sure you include the folder name and extension, e.g C:/Temp/ElvisZip.zip \n"
-mode = QLineEdit.Normal
-promptInitialText = "Full path here, e.g  C:/Temp/ElvisZip.zip"
-zipFolderFromElvis, ok = QInputDialog.getText(qid, promptTitle, promptLabel, mode, promptInitialText)
+infoBox = QMessageBox()
+infoBox.setWindowTitle("Before you choose the zip folder with lidar data in it")
+infoBox.setText("Ensure that the folder '" + lasToolsDirectory + "' contains LasTools's .exes\n\nAlso make sure that your QGIS project CRS matches the crs of the lidar data.")
+infoBox.setStandardButtons(QMessageBox.Ok)
+infoBox.exec_()
 
-
-#Determining where the folder path ends and where the file name starts
-for x in range(len(zipFolderFromElvis)):
-    if zipFolderFromElvis[x] == '/':
-        lastSlashIndex = x
-        
-for x in range(len(zipFolderFromElvis)):
-    if zipFolderFromElvis[x] == chr(92):
-        lastSlashIndex = x
-
-path = zipFolderFromElvis[:lastSlashIndex]
-zipName = zipFolderFromElvis[lastSlashIndex + 1:-4]
-
-#Replace backslashes with forward slashes
-path = path.replace(chr(92),'/')
-path = path.replace('\u202a','')
-
-
+#Get the zip from the user
+zipFolderFromElvis, _ = QFileDialog.getOpenFileName(None, "Select ZIP file", "", "ZIP files (*.zip)")
+zipName = os.path.splitext(os.path.basename(zipFolderFromElvis))[0]
 
 """
 #################################################################################
-Unzipping the elvis package
+Make all the directories and unzip
 """
 
+processingFolder = os.path.join(os.path.dirname(zipFolderFromElvis), zipName + "Processing")
+extractFolder = os.path.join(processingFolder, "extract")
+tifFolder = os.path.join(processingFolder, "tif")
+lasLazFolder = os.path.join(processingFolder, "laslaz")
+lasNormFolder = os.path.join(processingFolder, "lasnorm")
+mergedFolder = os.path.join(processingFolder, "merged")
+vegDensFolder = os.path.join(processingFolder, "vegdens")
+
+os.makedirs(processingFolder, exist_ok=True)
+os.makedirs(tifFolder, exist_ok=True)
+os.makedirs(lasLazFolder, exist_ok=True)
+os.makedirs(lasNormFolder, exist_ok=True)
+os.makedirs(mergedFolder, exist_ok=True)
+os.makedirs(vegDensFolder, exist_ok=True)
 
 #This makes sure you are running this is QGIS, where the processing module is available
 try:
     import processing
 except:
-    print("You need to run this in QGIS")
-    time.sleep(3)
-    sys.exit()
-
-#Set the directory to where the zip folder is
-try:
-    os.chdir(path)
-except:
-    print("The path seems invalid, are you sure this folder exists?")
-    time.sleep(1)
-    goFixItUp
-path = path.replace(os.sep, '/')
+    raise Exception("You need to run this in QGIS")
 
 #Extract the zip folder
 try:
-    with zipfile.ZipFile(path + '/' + zipName + '.zip','r') as zip_ref:
-        zip_ref.extractall(zipName + "Extract")
+    with zipfile.ZipFile(zipFolderFromElvis, "r") as zipFile:
+        zipFile.extractall(extractFolder)
 except:
-    print("Ok whatever zip folder you typed in seems invalid...")
-    time.sleep(1)
-    goFixItUp
-
+    raise Exception("Ok whatever zip folder you gave seems invalid...")
 
 """
 #################################################################################
 Sort the contents of the extracted zip
 """
 
-
 #Ok now look around in the extracted folder for nested zip folders
-filePathsList = glob.glob(path + '/' + zipName + 'Extract/**/*', recursive=True)
+filePathsList = glob.glob(os.path.join(extractFolder, "**", "*"), recursive=True)
 
-#Only grab actual zip folders
+#Get a list of all the zip folders inside the extract
 zipList = []
-for b in filePathsList:
-    if (b[-4:]) == '.zip':
-       zipList.append(b.replace(chr(92),'/'))
-
-count = 0
-#Extract all the internal zip folders into a temp folder
-for z in zipList:
-    count = count + 1
-    with zipfile.ZipFile(z,"r") as zip_ref:
-        zip_ref.extractall(zipName + 'Extract/Unzipped/UnzippedFolder' + str(count))
-
-
-#Set up new folders to put the relevant files into
-os.makedirs(path + '/' + zipName + 'Tif/', exist_ok = True)
-os.makedirs(path + '/' + zipName + 'LasLaz/', exist_ok = True)
-
-count = 0
-#Move all of the relevant files into their folders
-filePathsList = glob.glob(path + '/' + zipName + 'Extract/**/*', recursive=True)
 for filePath in filePathsList:
-    filePath = filePath.replace(chr(92),'/')
-    fileName = filePath.split("/")[-1]
-    
-    if filePath[-4:] == '.tif':
-        shutil.move(filePath, path + '/' + zipName + 'Tif/' + fileName)
-        count = count + 1
-        
-    if filePath[-4:] == '.las':
-        shutil.move(filePath, path + '/' + zipName + 'LasLaz/' + fileName)
-        count = count + 1
-        
-    if filePath[-4:] == '.laz':
-        shutil.move(filePath, path + '/' + zipName + 'LasLaz/' + fileName)
+    if filePath.lower().endswith(".zip"):
+        zipList.append(filePath)
+
+#Unzip them all
+count = 0
+for zipPath in zipList:
+    count = count + 1
+    unzippedFolder = os.path.join(extractFolder, "Unzipped", "UnzippedFolder" + str(count))
+    os.makedirs(unzippedFolder, exist_ok=True)
+    with zipfile.ZipFile(zipPath, "r") as zipFile:
+        zipFile.extractall(unzippedFolder)
+
+#Go through all of the files inside the extracted folder
+count = 0
+filePathsList = glob.glob(os.path.join(extractFolder, "**", "*"), recursive=True)
+for filePath in filePathsList:
+    if not os.path.isfile(filePath):
+        continue
+    fileName = os.path.basename(filePath)
+    fileExtension = os.path.splitext(fileName)[1].lower()
+
+    #If it's a tif, assume it's an elevation model
+    if fileExtension == ".tif":
+        shutil.move(filePath, os.path.join(tifFolder, fileName))
         count = count + 1
 
-print ('Yeah successfully sorted ' + str(int(count)) + ' files')
-#Delete the temp folders
-shutil.rmtree(path + '/' + zipName + 'Extract/')
+    #The point clouds could be las or laz
+    elif fileExtension == ".las" or fileExtension == ".laz":
+        shutil.move(filePath, os.path.join(lasLazFolder, fileName))
+        count = count + 1
 
-
+print('Yeah successfully sorted ' + str(int(count)) + ' files')
+#Delete the temp folder
+shutil.rmtree(extractFolder)
 
 """
 #################################################################################
 This is where we make a temp bat file that runs the las tools .exes
 """
 
-#Create directories for the normalis
-os.makedirs(path + '/' + zipName + 'LasNorm/', exist_ok = True)
-os.makedirs(path + '/' + zipName + 'Merged/', exist_ok = True)
+#Lasground the point clouds so they're normalised
+lasGroundResult = subprocess.run([os.path.join(lasToolsDirectory, "lasground_new64.exe"),  "-i", os.path.join(lasLazFolder, "*.las"), os.path.join(lasLazFolder, "*.laz"),
+    "-cores", str(multiprocessing.cpu_count()), "-wilderness", "-compute_height", "-replace_z", "-odir", lasNormFolder,
+    "-olas", "-demo"], cwd=lasToolsDirectory, capture_output=True, text=True)
+    
+if lasGroundResult.returncode != 0:
+    raise Exception("lasground_new64 failed\n\n" + (lasGroundResult.stderr or lasGroundResult.stdout or "No error text returned"))
 
-#The open up a bat ready for writing
-pathWithBackslashes = path.replace('/',chr(92))
-myBat = open(pathWithBackslashes + r'\LasToolsTempRunner.bat','w+')
+#Merge it all
+lasMergeResult = subprocess.run([os.path.join(lasToolsDirectory, "lasmerge64.exe"), "-i", os.path.join(lasNormFolder, "*.las"),
+    "-o", os.path.join(mergedFolder, "Merged.las"), "-drop_z_below", "-0.5",
+    "-drop_z_above", "1.8"], cwd=lasToolsDirectory, capture_output=True, text=True)
 
-#Write into the bat as per the readme of lastools
-myBat.write(r''':: set relevant variables
-cd /d "''' + lasToolsDirectory + r'''"
-
-:: print-out which LAStools version are we running
-lastile64 -version
-
-:: do the las ground thing
-lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.las" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas -demo
-lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.laz" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas -demo
-
-:: now we're going to merge the normalised las tiles together, make sure the folders line up with the parameters
-lasmerge64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm/*.las" -o "''' + pathWithBackslashes + '\\' + zipName + r'''Merged/Merged.las" -drop_z_below -0.5 -drop_z_above 1.8''')
-myBat.close()
-
-#Run the bat file 
-print("Alright we're running LasTools's stuff from cmd")
-subprocess.call([pathWithBackslashes + r'\LasToolsTempRunner.bat'])
-os.remove(pathWithBackslashes + r'\LasToolsTempRunner.bat')
-
+if lasMergeResult.returncode != 0:
+    raise Exception("lasmerge64 failed\n\n" + (lasMergeResult.stderr or lasMergeResult.stdout or "No error text returned"))
 
 """
 #################################################################################
 Sampling the lidar las file at various resolutions, to be later combined
 """
 
-#Make the folder for the veg density rasters
-os.makedirs(path + '/' + zipName + 'VegDens/', exist_ok = True)
+#Repeat the below for 3 different pixel sizes: 2, 3 and 4
+for x in range (2,5):
 
-#Determining the density both for the understory and the understory & ground
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':0,'type':1,'base_raster':None,'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':2,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,'output':path + '/' + zipName + 'VegDens/UnderstoryDens1.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':0,'type':1,'base_raster':None,'zrange':[-0.5,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':2,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,'output':path + '/' + zipName + 'VegDens/TotalLowerDens1.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
+    #Determining the density both for the understory 
+    processing.run("grass7:r.in.lidar", {'input':os.path.join(mergedFolder, "Merged.las"),'method':0,'type':1,'base_raster':None,
+        'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,
+        'resolution':x,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,
+        'output':os.path.join(vegDensFolder, "UnderstoryDens" + str(x) + ".tif")})
+    
+    #Get the density of the understory & ground
+    processing.run("grass7:r.in.lidar", {'input':os.path.join(mergedFolder, "Merged.las"),'method':0,'type':1,'base_raster':None,
+        'zrange':[-0.5,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,
+        'resolution':x,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,
+        'output':os.path.join(vegDensFolder, "TotalLowerDens" + str(x) + ".tif")})
 
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':0,'type':1,'base_raster':None,'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':3,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,'output':path + '/' + zipName + 'VegDens/UnderstoryDens2.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':0,'type':1,'base_raster':None,'zrange':[-0.5,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':3,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,'output':path + '/' + zipName + 'VegDens/TotalLowerDens2.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
+    #Set the lower density = 0 to null, so that we don't pretend we have information about places with no lidar returns
+    processing.run("gdal:rastercalculator", {'INPUT_A':os.path.join(vegDensFolder, "TotalLowerDens" + str(x) + ".tif"),'BAND_A':1,
+        'FORMULA':'where(A == 0, -1, A)','NO_DATA':-1,'EXTENT_OPT':0,'PROJWIN':None,'RTYPE':1,'OPTIONS':compressOptions,'EXTRA':'',
+        'OUTPUT':os.path.join(vegDensFolder, "TotalLowerDensNulled" + str(x) + ".tif")})
 
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':0,'type':1,'base_raster':None,'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':4,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,'output':path + '/' + zipName + 'VegDens/UnderstoryDens3.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':0,'type':1,'base_raster':None,'zrange':[-0.5,1.8],'zscale':1,'intensity_range':['nan','nan'],'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':4,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,'output':path + '/' + zipName + 'VegDens/TotalLowerDens3.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-
-#Remove nulls from the understory density (but not the total density) so that areas empty of vegetation can be calculated
-processing.run("gdal:rastercalculator", {'INPUT_A':path + '/' + zipName + 'VegDens/TotalLowerDens1.tif','BAND_A':1,'INPUT_B':None,'BAND_B':None,'INPUT_C':None,'BAND_C':None,'INPUT_D':None,'BAND_D':None,'INPUT_E':None,'BAND_E':None,'INPUT_F':None,'BAND_F':None,'FORMULA':'where(A == 0, -1, A)','NO_DATA':-1,'EXTENT_OPT':0,'PROJWIN':None,'RTYPE':1,'OPTIONS':compressOptions,'EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/TotalLowerDens1Nulled.tif'})
-processing.run("gdal:rastercalculator", {'INPUT_A':path + '/' + zipName + 'VegDens/TotalLowerDens2.tif','BAND_A':1,'INPUT_B':None,'BAND_B':None,'INPUT_C':None,'BAND_C':None,'INPUT_D':None,'BAND_D':None,'INPUT_E':None,'BAND_E':None,'INPUT_F':None,'BAND_F':None,'FORMULA':'where(A == 0, -1, A)','NO_DATA':-1,'EXTENT_OPT':0,'PROJWIN':None,'RTYPE':1,'OPTIONS':compressOptions,'EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/TotalLowerDens2Nulled.tif'})
-processing.run("gdal:rastercalculator", {'INPUT_A':path + '/' + zipName + 'VegDens/TotalLowerDens3.tif','BAND_A':1,'INPUT_B':None,'BAND_B':None,'INPUT_C':None,'BAND_C':None,'INPUT_D':None,'BAND_D':None,'INPUT_E':None,'BAND_E':None,'INPUT_F':None,'BAND_F':None,'FORMULA':'where(A == 0, -1, A)','NO_DATA':-1,'EXTENT_OPT':0,'PROJWIN':None,'RTYPE':1,'OPTIONS':compressOptions,'EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/TotalLowerDens3Nulled.tif'})
-
-#Calculate the normalised veg density
-processing.run("qgis:rastercalculator", {'EXPRESSION':'\"UnderstoryDens1@1\" / \"TotalLowerDens1Nulled@1\"','LAYERS':[path + '/' + zipName + 'VegDens/TotalLowerDens1Nulled.tif',path + '/' + zipName + 'VegDens/UnderstoryDens1.tif'],'CELLSIZE':0,'EXTENT':None,'CRS':None,'OUTPUT':path + '/' + zipName + 'VegDens/UnderstoryDens1Norm.tif'})
-processing.run("qgis:rastercalculator", {'EXPRESSION':'\"UnderstoryDens2@1\" / \"TotalLowerDens2Nulled@1\"','LAYERS':[path + '/' + zipName + 'VegDens/TotalLowerDens2Nulled.tif',path + '/' + zipName + 'VegDens/UnderstoryDens2.tif'],'CELLSIZE':0,'EXTENT':None,'CRS':None,'OUTPUT':path + '/' + zipName + 'VegDens/UnderstoryDens2Norm.tif'})
-processing.run("qgis:rastercalculator", {'EXPRESSION':'\"UnderstoryDens3@1\" / \"TotalLowerDens3Nulled@1\"','LAYERS':[path + '/' + zipName + 'VegDens/TotalLowerDens3Nulled.tif',path + '/' + zipName + 'VegDens/UnderstoryDens3.tif'],'CELLSIZE':0,'EXTENT':None,'CRS':None,'OUTPUT':path + '/' + zipName + 'VegDens/UnderstoryDens3Norm.tif'})
-
-#Fill in the holes using interpolation
-processing.run("grass7:r.fill.stats", {'input':path + '/' + zipName + 'VegDens/UnderstoryDens1Norm.tif','-k':True,'mode':0,'-m':False,'distance':3,'minimum':None,'maximum':None,'power':2,'cells':4,'output':path + '/' + zipName + 'VegDens/UnderstoryDens1NormFilled.tif','uncertainty':path + '/' + zipName + 'VegDens/Uncertainty1.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-processing.run("grass7:r.fill.stats", {'input':path + '/' + zipName + 'VegDens/UnderstoryDens2Norm.tif','-k':True,'mode':0,'-m':False,'distance':3,'minimum':None,'maximum':None,'power':2,'cells':4,'output':path + '/' + zipName + 'VegDens/UnderstoryDens2NormFilled.tif','uncertainty':path + '/' + zipName + 'VegDens/Uncertainty2.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-processing.run("grass7:r.fill.stats", {'input':path + '/' + zipName + 'VegDens/UnderstoryDens3Norm.tif','-k':True,'mode':0,'-m':False,'distance':3,'minimum':None,'maximum':None,'power':2,'cells':4,'output':path + '/' + zipName + 'VegDens/UnderstoryDens3NormFilled.tif','uncertainty':path + '/' + zipName + 'VegDens/Uncertainty3.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-
-#Determine the extent for the rasters to be combined to
-threeRaster = QgsRasterLayer(path + '/' + zipName + 'VegDens/UnderstoryDens1NormFilled.tif')
-threeRasterExtent = threeRaster.extent()
-QgsProject.instance().addMapLayer(threeRaster, False)
-QgsProject.instance().removeMapLayer(threeRaster.id())
+    #Normalise the understory density, so it is between 0 and 1
+    processing.run("gdal:rastercalculator", {'INPUT_A':os.path.join(vegDensFolder, "UnderstoryDens" + str(x) + ".tif"), 'BAND_A':1,
+        'INPUT_B':os.path.join(vegDensFolder, "TotalLowerDensNulled" + str(x) + ".tif"), 'BAND_B':1,
+        'FORMULA':'A / B', 'NO_DATA':-1, 'EXTENT_OPT':0, 'PROJWIN':None, 'RTYPE':5,
+        'OPTIONS':compressOptions, 'EXTRA':'', 'OUTPUT':os.path.join(vegDensFolder, "UnderstoryDensNorm" + str(x) + ".tif")})
+        
+    #Fill in the holes using interpolation
+    processing.run("grass7:r.fill.stats",{'input':os.path.join(vegDensFolder, "UnderstoryDensNorm" + str(x) + ".tif"),
+        '-k':True, 'mode':0, '-m':False, 'distance':3, 'minimum':None, 'maximum':None, 'power':2, 'cells':4,
+        'output':os.path.join(vegDensFolder, "UnderstoryDensNormFilled" + str(x) + ".tif"),
+        'uncertainty':os.path.join(vegDensFolder, "Uncertainty" + str(x) + ".tif")})
+        
+#Determine the extent for the rasters to be combined to, then drop the lock
+fourRaster = QgsRasterLayer(os.path.join(vegDensFolder, "UnderstoryDensNormFilled4.tif"))
+fourRasterExtent = fourRaster.extent()
+QgsProject.instance().addMapLayer(fourRaster, False)
+QgsProject.instance().removeMapLayer(fourRaster.id())
 
 #Resample the rasters, ready for combination
-processing.run("gdal:warpreproject", {'INPUT':path + '/' + zipName + 'VegDens/UnderstoryDens1NormFilled.tif','SOURCE_CRS':None,'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':threeRasterExtent,'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/UnderstoryDens1NormFilledResamp.tif'})
-processing.run("gdal:warpreproject", {'INPUT':path + '/' + zipName + 'VegDens/UnderstoryDens2NormFilled.tif','SOURCE_CRS':None,'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':threeRasterExtent,'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/UnderstoryDens2NormFilledResamp.tif'})
-processing.run("gdal:warpreproject", {'INPUT':path + '/' + zipName + 'VegDens/UnderstoryDens3NormFilled.tif','SOURCE_CRS':None,'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':threeRasterExtent,'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/UnderstoryDens3NormFilledResamp.tif'})
+for x in range (2,5):
+    processing.run("gdal:warpreproject", {'INPUT':os.path.join(vegDensFolder, "UnderstoryDensNormFilled" + str(x) + ".tif"),'SOURCE_CRS':None,
+        'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':fourRasterExtent,
+        'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'','OUTPUT':os.path.join(vegDensFolder, "UnderstoryDensNormFilledResamp" + str(x) + ".tif")})
 
 
 """
@@ -216,74 +184,24 @@ Creating and styling a the final density raster
 """
 
 #Bring the resampled rasters together
-processing.run("gdal:rastercalculator", {'INPUT_A':path + '/' + zipName + 'VegDens/UnderstoryDens1NormFilledResamp.tif','BAND_A':1,'INPUT_B':path + '/' + zipName + 'VegDens/UnderstoryDens2NormFilledResamp.tif','BAND_B':1,'INPUT_C':path + '/' + zipName + 'VegDens/UnderstoryDens3NormFilledResamp.tif','BAND_C':1,
-'FORMULA':'A+B+C','NO_DATA':-9999,'RTYPE':5,'OPTIONS':'','EXTRA':'','OUTPUT':path + '/' + zipName + 'VegDens/CombinedUnderstoryDensity.tif'})
+processing.run("gdal:rastercalculator", {'INPUT_A':os.path.join(vegDensFolder, "UnderstoryDensNormFilledResamp2.tif"),'BAND_A':1,
+    'INPUT_B':os.path.join(vegDensFolder, "UnderstoryDensNormFilledResamp3.tif"),'BAND_B':1,'INPUT_C':os.path.join(vegDensFolder, "UnderstoryDensNormFilledResamp4.tif"),'BAND_C':1,
+    'FORMULA':'A+B+C','NO_DATA':-9999,'RTYPE':5,'OPTIONS':'','EXTRA':'','OUTPUT':os.path.join(vegDensFolder, "CombinedUnderstoryDensity.tif")})
 
 #Style it so that there is a cumulative cut
-finalLayer = iface.addRasterLayer(path + '/' + zipName + 'VegDens/CombinedUnderstoryDensity.tif', 'CombinedUnderstoryDensity' , '')
-provider=finalLayer.dataProvider()
-statsRed = provider.cumulativeCut(1,0.01,0.99,sampleSize=1000) #adjust these values depending on the stretch you want
-minimum = statsRed[0]
-maximum = statsRed[1]
-renderer=finalLayer.renderer()
-myType = renderer.dataType(1)
-myEnhancement = QgsContrastEnhancement(myType)
-Renderer = QgsMultiBandColorRenderer(provider,1,1,1) 
-contrast_enhancement = QgsContrastEnhancement.StretchToMinimumMaximum
-myEnhancement.setContrastEnhancementAlgorithm(contrast_enhancement,True)
-myEnhancement.setMinimumValue(minimum)#where the minimum value goes in
-myEnhancement.setMaximumValue(maximum)
-finalLayer.setRenderer(Renderer)
-finalLayer.renderer().setRedBand(1)#band 1 is red
-finalLayer.renderer().setGreenBand(1)
-finalLayer.renderer().setBlueBand(1)
-finalLayer.renderer().setRedContrastEnhancement(myEnhancement)#the same contrast enhancement is applied to all
-finalLayer.renderer().setGreenContrastEnhancement(myEnhancement)
-finalLayer.renderer().setBlueContrastEnhancement(myEnhancement)
-finalLayer.triggerRepaint() #refresh
-
-"""
-#################################################################################
-Creating a low lying veg density raster
-"""
-
-
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':9,'type':1,'base_raster':None,'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],
-'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':4,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,
-'output':path + '/' + zipName + 'VegDens/Median4.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-
-processing.run("grass7:r.in.lidar", {'input':path + '/' + zipName + 'Merged/Merged.las','method':9,'type':1,'base_raster':None,'zrange':[0.25,1.8],'zscale':1,'intensity_range':['nan','nan'],
-'intensity_scale':1,'percent':100,'pth':None,'trim':None,'resolution':5,'return_filter':'','class_filter':'','-e':True,'-n':True,'-o':True,'-i':False,'-j':False,'-d':False,'-v':False,
-'output':path + '/' + zipName + 'VegDens/Median5.tif','GRASS_REGION_PARAMETER':None,'GRASS_REGION_CELLSIZE_PARAMETER':0,'GRASS_RASTER_FORMAT_OPT':'','GRASS_RASTER_FORMAT_META':''})
-
-processing.run("gdal:warpreproject", {'INPUT':path + '/' + zipName + 'VegDens/Median4.tif','SOURCE_CRS':None,'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,
-'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':threeRasterExtent,'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'',
-'OUTPUT':path + '/' + zipName + 'VegDens/Median4Resamp.tif'})
-
-processing.run("gdal:warpreproject", {'INPUT':path + '/' + zipName + 'VegDens/Median5.tif','SOURCE_CRS':None,'TARGET_CRS':None,'RESAMPLING':1,'NODATA':None,'TARGET_RESOLUTION':1,
-'OPTIONS':compressOptions,'DATA_TYPE':0,'TARGET_EXTENT':threeRasterExtent,'TARGET_EXTENT_CRS':None,'MULTITHREADING':True,'EXTRA':'',
-'OUTPUT':path + '/' + zipName + 'VegDens/Median5Resamp.tif'})
-
-processing.run("gdal:rastercalculator", {'INPUT_A':path + '/' + zipName + 'VegDens/Median4Resamp.tif','BAND_A':1,'INPUT_B':path + '/' + zipName + 'VegDens/Median5Resamp.tif','BAND_B':1,
-'INPUT_C':path + '/' + zipName + 'VegDens/CombinedUnderstoryDensity.tif','BAND_C':1,'FORMULA':'(0.65-A-B)*C','NO_DATA':-9999,'RTYPE':5,'OPTIONS':'','EXTRA':'',
-'OUTPUT':path + '/' + zipName + 'VegDens/BrackenDensity.tif'})
-
-brackenLayer = iface.addRasterLayer(path + '/' + zipName + 'VegDens/BrackenDensity.tif', 'BrackenDensity' , '')
-
-#Scale between transparent and dark blue, where areas of very low lying veg are dark blue
-fnc = QgsColorRampShader()
-fnc.setColorRampType(QgsColorRampShader.Interpolated)
-lst = [QgsColorRampShader.ColorRampItem(0.0, QColor(0,0,200,0)),QgsColorRampShader.ColorRampItem(0.2, QColor(0,0,200,255))]
-fnc.setColorRampItemList(lst)
-
-shader = QgsRasterShader()
-shader.setRasterShaderFunction(fnc)
-
-renderer = QgsSingleBandPseudoColorRenderer(brackenLayer.dataProvider(), 1, shader)
-brackenLayer.setRenderer(renderer)
-
-brackenLayer.triggerRepaint()
-
+finalLayer = iface.addRasterLayer(os.path.join(vegDensFolder, "CombinedUnderstoryDensity.tif"), 'CombinedUnderstoryDensity' , '')
+provider = finalLayer.dataProvider()
+minimum, maximum = provider.cumulativeCut(1, 0.01, 0.99, sampleSize=1000)
+multiBandRenderer = QgsMultiBandColorRenderer(provider, 1, 1, 1)
+contrastEnhancement = QgsContrastEnhancement(multiBandRenderer.dataType(1))
+contrastEnhancement.setContrastEnhancementAlgorithm(QgsContrastEnhancement.StretchToMinimumMaximum, True)
+contrastEnhancement.setMinimumValue(minimum)
+contrastEnhancement.setMaximumValue(maximum)
+finalLayer.setRenderer(multiBandRenderer)
+for bandColour in ["Red", "Green", "Blue"]:
+    getattr(finalLayer.renderer(), "set" + bandColour + "Band")(1)
+    getattr(finalLayer.renderer(), "set" + bandColour + "ContrastEnhancement")(contrastEnhancement)
+finalLayer.triggerRepaint()
 
 """
 #################################################################################
@@ -291,16 +209,11 @@ Merge the dems together
 """
 
 #Let's get all the tifs ready for merging
-path_to_tif = path + '/' + zipName + 'Tif/'
-os.chdir(path_to_tif)
-tifList = []
-for fname in glob.glob("*.tif"):
-    uri = path_to_tif + fname
-    tifList.append(uri)
+tifList = glob.glob(os.path.join(tifFolder, "*.tif"))
 
 #Merging the DEM tifs together
-processing.run("gdal:merge", {'INPUT':tifList,'PCT':False,'SEPARATE':False,'NODATA_INPUT':None,'NODATA_OUTPUT':None,'OPTIONS':compressOptions,'EXTRA':'','DATA_TYPE':5,'OUTPUT':path +  '/' + zipName + 'Merged/MergedDEM.tif'})
-
+processing.run("gdal:merge", {'INPUT':tifList,'PCT':False,'SEPARATE':False,'NODATA_INPUT':None,'NODATA_OUTPUT':None,
+    'OPTIONS':compressOptions,'EXTRA':'','DATA_TYPE':5,'OUTPUT':os.path.join(mergedFolder, "MergedDEM.tif")})
 
 """
 #################################################################################
@@ -308,21 +221,20 @@ Creating and styling a slope raster
 """
 
 #Time for some slope
-processing.run("native:slope", {'INPUT':path + '/' + zipName + 'Merged/MergedDEM.tif','Z_FACTOR':1,'OUTPUT':path + '/' + zipName + 'Merged/Slope.tif'})
+processing.run("native:slope", {'INPUT':os.path.join(mergedFolder, "MergedDEM.tif"),'Z_FACTOR':1,
+    'OUTPUT':os.path.join(mergedFolder, "Slope.tif")})
 
 #Now let's add that in and make it look nice
-slopeLayer = iface.addRasterLayer(path + '/' + zipName + 'Merged/Slope.tif', 'Slope' , '')
+slopeLayer = iface.addRasterLayer(os.path.join(mergedFolder, "Slope.tif"), 'Slope' , '')
 
 #Scale between transparent and yellow, where 35° is invisible and 65° is yellow
-fnc = QgsColorRampShader()
-fnc.setColorRampType(QgsColorRampShader.Interpolated)
-lst = [QgsColorRampShader.ColorRampItem(35, QColor(255,255,0,0)),QgsColorRampShader.ColorRampItem(65, QColor(255,255,0,255))]
-fnc.setColorRampItemList(lst)
-
-shader = QgsRasterShader()
-shader.setRasterShaderFunction(fnc)
-
-renderer = QgsSingleBandPseudoColorRenderer(slopeLayer.dataProvider(), 1, shader)
+colorRamp = QgsColorRampShader()
+colorRamp.setColorRampType(QgsColorRampShader.Interpolated)
+colorRamp.setColorRampItemList([QgsColorRampShader.ColorRampItem(35, QColor(255, 255, 0, 0)),
+    QgsColorRampShader.ColorRampItem(65, QColor(255, 255, 0, 255))])
+rasterShader = QgsRasterShader()
+rasterShader.setRasterShaderFunction(colorRamp)
+renderer = QgsSingleBandPseudoColorRenderer(slopeLayer.dataProvider(), 1, rasterShader)
 slopeLayer.setRenderer(renderer)
 slopeLayer.triggerRepaint()
 
@@ -332,14 +244,13 @@ Creating and styling contours
 """
 
 #Now let's make some contours and bring them in too
-processing.run("gdal:contour", {'INPUT':path + '/' + zipName + 'Merged/MergedDEM.tif','BAND':1,'INTERVAL':2,'FIELD_NAME':'ELEV','CREATE_3D':False,'IGNORE_NODATA':False,'NODATA':None,'OFFSET':0,'EXTRA':'','OUTPUT':path + '/' + zipName + 'Merged/Contours2.gpkg'})
-
-contourLayer  = iface.addVectorLayer(path + '/' + zipName + 'Merged/Contours2.gpkg', 'Contours2' , 'ogr')
+processing.run("gdal:contour", {'INPUT':os.path.join(mergedFolder, "MergedDEM.tif"),'BAND':1,'INTERVAL':2,'FIELD_NAME':'ELEV',
+    'CREATE_3D':False,'IGNORE_NODATA':False,'NODATA':None,'OFFSET':0,'EXTRA':'','OUTPUT':os.path.join(mergedFolder, "Contours2.gpkg")})
+contourLayer  = iface.addVectorLayer(os.path.join(mergedFolder, "Contours2.gpkg"), 'Contours2' , 'ogr')
 
 #Thin lines so that the other layers can be seen beneath easily
 symbol = QgsLineSymbol.createSimple({'line_style': 'solid', 'color': 'magenta', 'width': '0.12'})
 contourLayer.renderer().setSymbol(symbol)
 contourLayer.triggerRepaint()
-
 
 print("All done")

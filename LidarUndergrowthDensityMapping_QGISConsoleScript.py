@@ -152,8 +152,8 @@ cd /d "''' + lasToolsDirectory + r'''"
 lastile64 -version
 
 :: do the las ground thing
-lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.las" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
-lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.laz" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas
+lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.las" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas -demo
+lasground_new64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasLaz/*.laz" -cores ''' + str(multiprocessing.cpu_count()) + ''' -wilderness -compute_height -replace_z -odir "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm" -olas -demo
 
 :: now we're going to merge the normalised las tiles together, make sure the folders line up with the parameters
 lasmerge64 -i "''' + pathWithBackslashes + '\\' + zipName + r'''LasNorm/*.las" -o "''' + pathWithBackslashes + '\\' + zipName + r'''Merged/Merged.las" -drop_z_below -0.5 -drop_z_above 1.8''')

@@ -33,6 +33,7 @@ zipName = os.path.splitext(os.path.basename(zipFolderFromElvis))[0]
 Make all the directories and unzip
 """
 
+#Define all the directories
 processingFolder = os.path.join(os.path.dirname(zipFolderFromElvis), zipName + "Processing")
 extractFolder = os.path.join(processingFolder, "extract")
 tifFolder = os.path.join(processingFolder, "tif")
@@ -41,6 +42,7 @@ lasNormFolder = os.path.join(processingFolder, "lasnorm")
 mergedFolder = os.path.join(processingFolder, "merged")
 vegDensFolder = os.path.join(processingFolder, "vegdens")
 
+#Make all the directories
 os.makedirs(processingFolder, exist_ok=True)
 os.makedirs(tifFolder, exist_ok=True)
 os.makedirs(lasLazFolder, exist_ok=True)
@@ -116,7 +118,8 @@ This is where we make a temp bat file that runs the las tools .exes
 lasGroundResult = subprocess.run([os.path.join(lasToolsDirectory, "lasground_new64.exe"),  "-i", os.path.join(lasLazFolder, "*.las"), os.path.join(lasLazFolder, "*.laz"),
     "-cores", str(multiprocessing.cpu_count()), "-wilderness", "-compute_height", "-replace_z", "-odir", lasNormFolder,
     "-olas", "-demo"], cwd=lasToolsDirectory, capture_output=True, text=True)
-    
+
+#Print any errors
 if lasGroundResult.returncode != 0:
     raise Exception("lasground_new64 failed\n\n" + (lasGroundResult.stderr or lasGroundResult.stdout or "No error text returned"))
 
